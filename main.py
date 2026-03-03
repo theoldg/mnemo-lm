@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import typing
 from typing import Self
+import re
 
 from fire import Fire
 from tqdm.auto import tqdm
@@ -10,37 +11,32 @@ from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
 import torch
 
 MAP = {
+    # Longer first!
+    'SZ': 6, 'CZ': 6, 'DŻ': 6, 'DZ': 6, 'DŹ': 6, 'RZ': 6,
+    'CH': None,
+    # One-letter phonemes.
+    'Ż': 6,
     'T': 1, 'D': 1,
     'N': 2, 'Ń': 2,
     'M': 3,
     'R': 4,
     'L': 5,
-    'SZ': 6, 'CZ': 6, 'Ż': 6, 'DŻ': 6, 'DZ': 6, 'DŹ': 6, 'RZ': 6,
     'K': 7, 'G': 7,
     'F': 8, 'W': 8,
     'P': 9, 'B': 9,
     'Z': 0, 'S': 0, 'Ź': 0, 'Ś': 0,
-    'CH': None,
 }
 
 
-def string_to_digits(s: str):
-    pos = 0
-    s = s.upper()
-    digits = []
-    while pos < len(s):
-        substring = s[pos: pos + 2]
-        if substring in MAP:
-            digits.append(MAP[substring])
-            pos += 2
-            continue
-        substring = s[pos: pos + 1]
-        if substring in MAP:
-            digits.append(MAP[substring])
-            pos += 1
-            continue
-        pos += 1
-    return [d for d in digits if d is not None]
+_PATTERN = re.compile('|'.join(sorted(MAP.keys(), key=len, reverse=True)))
+
+def string_to_digits(text: str) -> list[int]:
+    matches = _PATTERN.findall(text.upper())
+    return [
+        MAP[m] 
+        for m in matches 
+        if MAP[m] is not None
+    ]
 
 
 @dataclass
@@ -49,38 +45,40 @@ class ModelAndTokenizer:
     tokenizer: Qwen2Tokenizer
 
 
+@dataclass
 class PrefixTree:
+    tokens: torch.Tensor
+    branches: dict[int, Self]
+
+    def get(self, lst: list[int]) -> torch.Tensor:
+        if not lst:
+            return self.tokens
+        if lst[0] not in self.branches:
+            return torch.tensor([])
+        return self.branches[lst[0]].get(lst[1:])
+
+class PrefixTreeBuilder:
     def __init__(self):
-        self.tokens: list | torch.Tensor = []
+        self.tokens: list = []
         self.branches: dict[int, Self] = {}
-        
-
-def add_to_tree(t: PrefixTree, lst: list[int], id: int):
-    if not lst:
-        assert isinstance(t.tokens, list)
-        t.tokens.append(id)
-        return
-
-    if lst[0] not in t.branches:
-        t.branches[lst[0]] = PrefixTree()
     
-    add_to_tree(t.branches[lst[0]], lst[1:], id)
+    @classmethod
+    def new(cls):
+        return cls()
 
+    def add(self, lst: list[int], id: int):
+        if not lst:
+            self.tokens.append(id)
+            return
+        if lst[0] not in self.branches:
+            self.branches[lst[0]] = self.new()
+        self.branches[lst[0]].add(lst[1:], id)
 
-def tensorize_tree(t: PrefixTree):
-    t.tokens = torch.tensor(t.tokens, dtype=torch.long)
-    for subtree in t.branches.values():
-        tensorize_tree(subtree)
-
-
-def get_from_tree(t: PrefixTree, lst: list[int]):
-    if not lst:
-        return t.tokens
-
-    if lst[0] not in t.branches:
-        return []
-
-    return get_from_tree(t.branches[lst[0]], lst[1:])
+    def build(self) -> PrefixTree:
+        return PrefixTree(
+            tokens=torch.tensor(self.tokens, dtype=torch.long),
+            branches={k: v.build() for k, v in self.branches.items()}
+        )
 
 
 @dataclass
@@ -94,7 +92,37 @@ class PreprocessedVocab:
         return len(self.digits)
 
 
-class MemGenProcessor(LogitsProcessor):
+def preprocess_vocab(tokenizer: Qwen2Tokenizer) -> PreprocessedVocab:
+    vocab_size = len(tokenizer.vocab)
+    sequences: list = [None for _ in range(vocab_size)]
+    strings: list = [None for _ in range(vocab_size)]
+    for s, index in tqdm(tokenizer.vocab.items()):
+        s = tokenizer.decode(index)
+        digits = string_to_digits(s)  # type: ignore
+        sequences[index] = digits
+        strings[index] = s.upper()  # type: ignore
+
+    tree = PrefixTreeBuilder()
+    for i, toks in enumerate(sequences):
+        tree.add(toks, i)
+
+    startswith = {}
+    for letter in 'ZŻŹ':
+        lst = []
+        for i, s in enumerate(strings):
+            if s.startswith(letter):
+                lst.append(i)
+        startswith[letter] = torch.tensor(lst, dtype=torch.long)
+
+    return PreprocessedVocab(
+        digits=sequences,
+        strings=strings,
+        tree=tree.build(),
+        startswith=startswith,
+    )
+
+
+class ConstrainedMnemonicProcessor(LogitsProcessor):
     def __init__(
         self,
         preprocessed_vocab: PreprocessedVocab,
@@ -116,7 +144,6 @@ class MemGenProcessor(LogitsProcessor):
             self.pbar = tqdm(desc='Searching...')
         else:
             self.pbar = None
-    
 
     def call_single(self, input_ids, scores):
         current_digits = []
@@ -143,22 +170,24 @@ class MemGenProcessor(LogitsProcessor):
 
         # Unmask and nudge relevant tokens.
         for i in range(len(remaining_digits) + 1):
-            results = get_from_tree(self.preprocessed_vocab.tree, remaining_digits[:i])
+            results = self.preprocessed_vocab.tree.get(remaining_digits[:i])
             if len(results) == 0:
                 continue
             scores[results] += self.nudge * i
             mask[results] = 1
 
         # Re-mask anything with a forbidden prefix.
-        last_letter = self.preprocessed_vocab.strings[input_ids[-1]][-1]
-        if last_letter in 'SCR':
-            forbidden_prefixes = 'Z'
-        elif last_letter == 'D':
-            forbidden_prefixes = 'ŻZŹ'
-        else:
-            forbidden_prefixes = ''
-        for prefix in forbidden_prefixes:
-            mask[self.preprocessed_vocab.startswith[prefix]] = 0
+        last_token = self.preprocessed_vocab.strings[input_ids[-1]]
+        if last_token:
+            last_letter = last_token[-1]
+            if last_letter in 'SCR':
+                forbidden_prefixes = 'Z'
+            elif last_letter == 'D':
+                forbidden_prefixes = 'ŻZŹ'
+            else:
+                forbidden_prefixes = ''
+            for prefix in forbidden_prefixes:
+                mask[self.preprocessed_vocab.startswith[prefix]] = 0
         
         # Apply mask.
         scores[~mask] = -torch.inf
@@ -188,37 +217,6 @@ def load_model_and_tokenizer() -> ModelAndTokenizer:
     return ModelAndTokenizer(model=model, tokenizer=tokenizer)
 
 
-def preprocess_vocab(tokenizer: Qwen2Tokenizer) -> PreprocessedVocab:
-    vocab_size = len(tokenizer.vocab)
-    sequences: list = [None for _ in range(vocab_size)]
-    strings: list = [None for _ in range(vocab_size)]
-    for s, index in tqdm(tokenizer.vocab.items()):
-        s = tokenizer.decode(index)
-        digits = string_to_digits(s)  # type: ignore
-        sequences[index] = digits
-        strings[index] = s.upper()  # type: ignore
-
-    tree = PrefixTree()
-    for i, toks in enumerate(sequences):
-        add_to_tree(tree, toks, i)
-    tensorize_tree(tree)
-
-    startswith = {}
-    for letter in 'ZŻŹ':
-        lst = []
-        for i, s in enumerate(strings):
-            if s.startswith(letter):
-                lst.append(i)
-        startswith[letter] = torch.tensor(lst, dtype=torch.long)
-
-    return PreprocessedVocab(
-        digits=sequences,
-        strings=strings,
-        tree=tree,
-        startswith=startswith,
-    )
-
-
 def encode_digits(
     prompt: str,
     digits: list[int],
@@ -237,7 +235,7 @@ def encode_digits(
     )  # type: ignore
     model_inputs = mnt.tokenizer([text], return_tensors="pt").to(mnt.model.device)
 
-    processor = MemGenProcessor(
+    processor = ConstrainedMnemonicProcessor(
         preprocessed_vocab=vocab,
         tokenizer=mnt.tokenizer,
         target=digits,
