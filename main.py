@@ -15,7 +15,7 @@ MAP = {
     'M': 3,
     'R': 4,
     'L': 5,
-    'SZ': 6, 'CZ': 6, 'Ż': 6, 'DŻ': 6, 'DZ': 6, 'DŹ': 6,
+    'SZ': 6, 'CZ': 6, 'Ż': 6, 'DŻ': 6, 'DZ': 6, 'DŹ': 6, 'RZ': 6,
     'K': 7, 'G': 7,
     'F': 8, 'W': 8,
     'P': 9, 'B': 9,
@@ -103,6 +103,7 @@ class MemGenProcessor(LogitsProcessor):
         prompt_size: int,
         nudge: float,
         stop_nudge: float,
+        progress: bool = True,
     ):
         super().__init__()
         self.preprocessed_vocab = preprocessed_vocab
@@ -111,6 +112,10 @@ class MemGenProcessor(LogitsProcessor):
         self.prompt_size = prompt_size
         self.nudge = nudge
         self.stop_nudge = stop_nudge
+        if progress:
+            self.pbar = tqdm(desc='Searching...')
+        else:
+            self.pbar = None
     
 
     def call_single(self, input_ids, scores):
@@ -123,6 +128,12 @@ class MemGenProcessor(LogitsProcessor):
         mask = torch.zeros_like(scores, dtype=torch.bool)
 
         remaining_digits = self.target[len(current_digits):]
+        
+        if self.pbar is not None:
+            self.pbar.set_description(
+                f'Generated: {len(input_ids) - self.prompt_size}. '
+                f'Remaining digits: {len(remaining_digits)}'
+            )
 
         # Unmask and nudge the EOS token.
         if not remaining_digits:
@@ -140,7 +151,7 @@ class MemGenProcessor(LogitsProcessor):
 
         # Re-mask anything with a forbidden prefix.
         last_letter = self.preprocessed_vocab.strings[input_ids[-1]][-1]
-        if (last_letter == 'S') or (last_letter == 'C') :
+        if last_letter in 'SCR':
             forbidden_prefixes = 'Z'
         elif last_letter == 'D':
             forbidden_prefixes = 'ŻZŹ'
@@ -166,7 +177,8 @@ class MemGenProcessor(LogitsProcessor):
 
 @typing.no_type_check
 def load_model_and_tokenizer() -> ModelAndTokenizer:
-    model_name = "Qwen/Qwen3-0.6B"
+    # model_name = "Qwen/Qwen3-0.6B"
+    model_name = "Qwen/Qwen3-8B"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -208,6 +220,7 @@ def preprocess_vocab(tokenizer: Qwen2Tokenizer) -> PreprocessedVocab:
 
 
 def encode_digits(
+    prompt: str,
     digits: list[int],
     mnt: ModelAndTokenizer,
     vocab: PreprocessedVocab,
@@ -215,8 +228,6 @@ def encode_digits(
     stop_nudge: float,
     generate_args: dict,
 ) -> list[str]:
-    prompt = "Napisz przykładowe zdanie po Polsku,"
-
     messages = [{"role": "user", "content": prompt}]
     text: str = mnt.tokenizer.apply_chat_template(
         messages,
@@ -257,15 +268,17 @@ def main_interactive():
     prepr_vocab = preprocess_vocab(mnt.tokenizer)
 
     while True:
-        input_string = input('Type the digits you want to encode: ')
+        input_string = input('Digits: ')
         try:
             digits = list(map(int, str(input_string)))
             assert digits
         except:
             print('Invalid input')
             continue
+        prompt = input('Prompt: ') or 'Napisz krótkie zdanie po Polsku.'
     
         encoded_strings = encode_digits(
+            prompt,
             digits,
             mnt=mnt,
             vocab=prepr_vocab,
@@ -284,10 +297,10 @@ def main_interactive():
 
         for encoded in encoded_strings:
             print('+' * 50)
-            print(encoded)
             decoded = string_to_digits(encoded)
             if decoded != digits:
-                print('Error. Back-decoded:', ''.join(map(str, decoded)))
+                print('[Error]. Back-decoded:', ''.join(map(str, decoded)))
+            print(encoded)
         print('-' * 50 + '\n')
 
 
