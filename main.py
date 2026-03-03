@@ -205,9 +205,11 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
 
 
 @typing.no_type_check
-def load_model_and_tokenizer() -> ModelAndTokenizer:
-    # model_name = "Qwen/Qwen3-0.6B"
-    model_name = "Qwen/Qwen3-8B"
+def load_model_and_tokenizer(big: bool) -> ModelAndTokenizer:
+    if big:
+        model_name = "Qwen/Qwen3-8B"
+    else:
+        model_name = "Qwen/Qwen3-0.6B"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -261,8 +263,8 @@ def encode_digits(
     return generated_strings
 
 
-def main_interactive():
-    mnt = load_model_and_tokenizer()
+def main_interactive(big: bool = False):
+    mnt = load_model_and_tokenizer(big=big)
     prepr_vocab = preprocess_vocab(mnt.tokenizer)
 
     while True:
