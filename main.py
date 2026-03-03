@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 import typing
 from typing import Self
-import math
 
 from fire import Fire
 from tqdm.auto import tqdm
@@ -9,7 +8,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, LogitsProcessor, L
 from transformers.models.qwen2.tokenization_qwen2 import Qwen2Tokenizer
 from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
 import torch
-
 
 MAP = {
     'T': 1, 'D': 1,
@@ -125,15 +123,12 @@ class MemGenProcessor(LogitsProcessor):
         mask = torch.zeros_like(scores, dtype=torch.bool)
 
         remaining_digits = self.target[len(current_digits):]
+
+        # Unmask and nudge the EOS token.
         if not remaining_digits:
             eos_id = self.tokenizer.convert_tokens_to_ids('<|im_end|>')
             scores[eos_id] += self.stop_nudge
             mask[eos_id] = 1
-
-        # Unmask all special tokens.
-        num_special_tokens = len(scores) - len(self.preprocessed_vocab)
-        assert num_special_tokens != 0
-        mask[-num_special_tokens:] = 1
 
         # Unmask and nudge relevant tokens.
         for i in range(len(remaining_digits) + 1):
@@ -218,9 +213,8 @@ def encode_digits(
     vocab: PreprocessedVocab,
     nudge: float,
     stop_nudge: float,
-    max_tokens: int,
     generate_args: dict,
-):
+) -> list[str]:
     prompt = "Napisz przykładowe zdanie po Polsku,"
 
     messages = [{"role": "user", "content": prompt}]
@@ -243,15 +237,19 @@ def encode_digits(
 
     generated_ids = mnt.model.generate(
         **model_inputs,  # type: ignore
-        max_new_tokens=max_tokens,
-        logits_processor=LogitsProcessorList([processor]),
         **generate_args,
+        logits_processor=LogitsProcessorList([processor]),
     )
 
-    output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist() 
-    content = mnt.tokenizer.decode(output_ids, skip_special_tokens=True).strip("\n")  # type: ignore
+    generated_strings = []
+    for output_ids in generated_ids[:, len(model_inputs.input_ids[0]):]:
+        generated_strings.append(
+            mnt.tokenizer.decode(
+                output_ids,
+                skip_special_tokens=True).strip("\n"), # type: ignore
+        )
 
-    return content
+    return generated_strings
 
 
 def main_interactive():
@@ -267,28 +265,34 @@ def main_interactive():
             print('Invalid input')
             continue
     
-        encoded = encode_digits(
+        encoded_strings = encode_digits(
             digits,
             mnt=mnt,
             vocab=prepr_vocab,
             nudge=3,
             stop_nudge=10,
-            max_tokens=len(digits) * 10,
             generate_args=dict(
                 num_beams=20,
-                do_sample=True,
+                num_beam_groups=5,
+                diversity_penalty=2.,
+                do_sample=False,
                 early_stopping=True,
                 length_penalty=0.7,
+                trust_remote_code=True,
+                max_new_tokens=10 * len(digits),
+                num_return_sequences=10,
             ),
         )
-        print(encoded)
 
-        decoded = string_to_digits(encoded)
-        if decoded != digits:
-            print('Error. Back-decoded:', ''.join(map(str, decoded)))
-
-        print('-' * 50)
+        for encoded in encoded_strings:
+            print('+' * 50)
+            print(encoded)
+            decoded = string_to_digits(encoded)
+            if decoded != digits:
+                print('Error. Back-decoded:', ''.join(map(str, decoded)))
+        print('-' * 50 + '\n')
 
 
 if __name__ == '__main__':
     Fire(main_interactive)
+
