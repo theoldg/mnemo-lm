@@ -273,12 +273,10 @@ def main_interactive():
             stop_nudge=10,
             generate_args=dict(
                 num_beams=20,
-                num_beam_groups=5,
-                diversity_penalty=2.,
-                do_sample=False,
+                diversity_penalty=10.,
+                do_sample=True,
                 early_stopping=True,
                 length_penalty=0.7,
-                trust_remote_code=True,
                 max_new_tokens=10 * len(digits),
                 num_return_sequences=10,
             ),
@@ -295,4 +293,3 @@ def main_interactive():
 
 if __name__ == '__main__':
     Fire(main_interactive)
-
