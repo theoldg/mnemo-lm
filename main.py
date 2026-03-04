@@ -21,7 +21,12 @@ class DigitMap:
     pattern: re.Pattern
     digraphs: dict[str, str]
 
-    def __init__(self, map: dict[str, int]):
+    def __init__(
+        self,
+        default_prompt: str,
+        map: dict[str, int],
+    ):
+        self.default_prompt = default_prompt
         self.map = map
         self.pattern = re.compile('|'.join(
             # Longest first!
@@ -39,51 +44,57 @@ class DigitMap:
         return [self.map[m] for m in matches]
 
 
-PL_MAP = DigitMap({
-    'T': 1, 'D': 1,
-    'N': 2, 'Ń': 2,
-    'M': 3,
-    'R': 4,
-    'L': 5,
-    'SZ': 6, 'CZ': 6, 'DŻ': 6, 'DZ': 6, 'DŹ': 6, 'RZ': 6, 'Ż': 6,
-    'K': 7, 'G': 7,
-    'F': 8, 'W': 8,
-    'P': 9, 'B': 9,
-    'Z': 0, 'S': 0, 'Ź': 0, 'Ś': 0,
-})
+PL_MAP = DigitMap(
+    default_prompt="Wymyśl krótkie zdanie brzmiące jak Polskie przysłowie",
+    map={
+        'T': 1, 'D': 1,
+        'N': 2, 'Ń': 2,
+        'M': 3,
+        'R': 4,
+        'L': 5,
+        'SZ': 6, 'CZ': 6, 'DŻ': 6, 'DZ': 6, 'DŹ': 6, 'RZ': 6, 'Ż': 6,
+        'K': 7, 'G': 7,
+        'F': 8, 'W': 8,
+        'P': 9, 'B': 9,
+        'Z': 0, 'S': 0, 'Ź': 0, 'Ś': 0,
+    },
+)
 
 
 # Dummy map, no phoneme handling, written by G.
-EN_MAP = DigitMap({
-    # --- Digraphs ---
-    'TH': 1,
-    'SH': 6, 'CH': 6,
-    'CK': 7,
-    'PH': 8,
-    
-    # --- Double Consonants (to prevent double-counting) ---
-    'TT': 1, 'DD': 1,
-    'NN': 2,
-    'MM': 3,
-    'RR': 4,
-    'LL': 5,
-    'GG': 7, 'KK': 7, 'CC': 7,
-    'FF': 8, 'VV': 8,
-    'PP': 9, 'BB': 9,
-    'SS': 0, 'ZZ': 0,
+EN_MAP = DigitMap(
+    default_prompt="Write a snappy made up proverb.",
+    map={
+        # --- Digraphs ---
+        'TH': 1,
+        'SH': 6, 'CH': 6,
+        'CK': 7,
+        'PH': 8,
+        
+        # --- Double Consonants (to prevent double-counting) ---
+        'TT': 1, 'DD': 1,
+        'NN': 2,
+        'MM': 3,
+        'RR': 4,
+        'LL': 5,
+        'GG': 7, 'KK': 7, 'CC': 7,
+        'FF': 8, 'VV': 8,
+        'PP': 9, 'BB': 9,
+        'SS': 0, 'ZZ': 0,
 
-    # --- Single Consonants ---
-    'T': 1, 'D': 1,
-    'N': 2,
-    'M': 3,
-    'R': 4,
-    'L': 5,
-    'J': 6,
-    'K': 7, 'G': 7, 'Q': 7, 'C': 7,
-    'F': 8, 'V': 8,
-    'P': 9, 'B': 9,
-    'S': 0, 'Z': 0,
-})
+        # --- Single Consonants ---
+        'T': 1, 'D': 1,
+        'N': 2,
+        'M': 3,
+        'R': 4,
+        'L': 5,
+        'J': 6,
+        'K': 7, 'G': 7, 'Q': 7, 'C': 7,
+        'F': 8, 'V': 8,
+        'P': 9, 'B': 9,
+        'S': 0, 'Z': 0,
+    },
+)
 
 
 DIGIT_MAPS = {
@@ -322,7 +333,7 @@ def encode_digits(
     return generated_strings
 
 
-def main_interactive(big: bool = False, lang: str = 'pl'):
+def main_interactive(lang: str = 'pl', big: bool = True):
     digit_map = DIGIT_MAPS[lang]
     mnt = load_model_and_tokenizer(big=big)
     prepr_vocab = preprocess_vocab(mnt.tokenizer, digit_map)
@@ -335,8 +346,7 @@ def main_interactive(big: bool = False, lang: str = 'pl'):
         except:
             print('Invalid input')
             continue
-        prompt = input('Prompt (skip for default): ') \
-            or 'Napisz krótkie zdanie po Polsku.'
+        prompt = input('Prompt (skip for default): ') or digit_map.default_prompt
     
         encoded_strings = encode_digits(
             prompt,
