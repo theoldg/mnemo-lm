@@ -1,48 +1,95 @@
+from collections import defaultdict
 from dataclasses import dataclass
-import typing
-from typing import Self
+from typing import Self, cast
 import re
 
 from fire import Fire
 from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, LogitsProcessor, LogitsProcessorList
-from transformers.models.qwen2.tokenization_qwen2 import Qwen2Tokenizer
-from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    LogitsProcessor,
+    LogitsProcessorList,
+    TokenizersBackend,
+    GenerationMixin,
+)
 import torch
 
-MAP = {
-    # Longer first!
-    'SZ': 6, 'CZ': 6, 'DŻ': 6, 'DZ': 6, 'DŹ': 6, 'RZ': 6,
-    'CH': None,
-    # One-letter phonemes.
-    'Ż': 6,
+
+class DigitMap:
+    map: dict[str, int]
+    pattern: re.Pattern
+    digraphs: dict[str, str]
+
+    def __init__(self, map: dict[str, int]):
+        self.map = map
+        self.pattern = re.compile('|'.join(
+            # Longest first!
+            sorted(map.keys(), key=len, reverse=True))
+        )
+        
+        self.digraph_map = defaultdict(list)
+        for key in map:
+            if len(key) == 2:
+                x, y = key
+                self.digraph_map[x].append(y)
+
+    def apply(self, s: str) -> list[int]:
+        matches = self.pattern.findall(s.upper())
+        return [self.map[m] for m in matches]
+
+
+PL_MAP = DigitMap({
     'T': 1, 'D': 1,
     'N': 2, 'Ń': 2,
     'M': 3,
     'R': 4,
     'L': 5,
+    'SZ': 6, 'CZ': 6, 'DŻ': 6, 'DZ': 6, 'DŹ': 6, 'RZ': 6, 'Ż': 6,
     'K': 7, 'G': 7,
     'F': 8, 'W': 8,
     'P': 9, 'B': 9,
     'Z': 0, 'S': 0, 'Ź': 0, 'Ś': 0,
+})
+
+
+# Dummy map, no phoneme handling, written by G.
+EN_MAP = DigitMap({
+    # --- Digraphs ---
+    'TH': 1,
+    'SH': 6, 'CH': 6,
+    'CK': 7,
+    'PH': 8,
+    
+    # --- Double Consonants (to prevent double-counting) ---
+    'TT': 1, 'DD': 1,
+    'NN': 2,
+    'MM': 3,
+    'RR': 4,
+    'LL': 5,
+    'GG': 7, 'KK': 7, 'CC': 7,
+    'FF': 8, 'VV': 8,
+    'PP': 9, 'BB': 9,
+    'SS': 0, 'ZZ': 0,
+
+    # --- Single Consonants ---
+    'T': 1, 'D': 1,
+    'N': 2,
+    'M': 3,
+    'R': 4,
+    'L': 5,
+    'J': 6,
+    'K': 7, 'G': 7, 'Q': 7, 'C': 7,
+    'F': 8, 'V': 8,
+    'P': 9, 'B': 9,
+    'S': 0, 'Z': 0,
+})
+
+
+DIGIT_MAPS = {
+    'pl': PL_MAP,
+    'en': EN_MAP,
 }
-
-
-_PATTERN = re.compile('|'.join(sorted(MAP.keys(), key=len, reverse=True)))
-
-def string_to_digits(text: str) -> list[int]:
-    matches = _PATTERN.findall(text.upper())
-    return [
-        MAP[m] 
-        for m in matches 
-        if MAP[m] is not None
-    ]
-
-
-@dataclass
-class ModelAndTokenizer:
-    model: Qwen3ForCausalLM
-    tokenizer: Qwen2Tokenizer
 
 
 @dataclass
@@ -56,6 +103,7 @@ class PrefixTree:
         if lst[0] not in self.branches:
             return torch.tensor([])
         return self.branches[lst[0]].get(lst[1:])
+
 
 class PrefixTreeBuilder:
     def __init__(self):
@@ -86,28 +134,35 @@ class PreprocessedVocab:
     digits: list[list[int]]
     strings: list[str]
     tree: PrefixTree
-    startswith: dict[str, int]
+    startswith: dict[str, torch.Tensor]
+    digit_map: DigitMap
 
     def __len__(self):
         return len(self.digits)
 
 
-def preprocess_vocab(tokenizer: Qwen2Tokenizer) -> PreprocessedVocab:
+def preprocess_vocab(
+    tokenizer: TokenizersBackend,
+    digit_map: DigitMap,
+) -> PreprocessedVocab:
     vocab_size = len(tokenizer.vocab)
     sequences: list = [None for _ in range(vocab_size)]
     strings: list = [None for _ in range(vocab_size)]
     for s, index in tqdm(tokenizer.vocab.items()):
         s = tokenizer.decode(index)
-        digits = string_to_digits(s)  # type: ignore
+        s = cast(str, s)
+        digits = digit_map.apply(s)
         sequences[index] = digits
-        strings[index] = s.upper()  # type: ignore
+        strings[index] = s.upper()
 
     tree = PrefixTreeBuilder()
     for i, toks in enumerate(sequences):
         tree.add(toks, i)
 
-    startswith = {}
-    for letter in 'ZŻŹ':
+    # Track which tokens start with a second letter of a digraph.
+    digraph_suffixes = sum(digit_map.digraph_map.values(), [])
+    startswith: dict[str, torch.Tensor] = {}
+    for letter in digraph_suffixes:
         lst = []
         for i, s in enumerate(strings):
             if s.startswith(letter):
@@ -119,6 +174,7 @@ def preprocess_vocab(tokenizer: Qwen2Tokenizer) -> PreprocessedVocab:
         strings=strings,
         tree=tree.build(),
         startswith=startswith,
+        digit_map=digit_map,
     )
 
 
@@ -126,7 +182,7 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
     def __init__(
         self,
         preprocessed_vocab: PreprocessedVocab,
-        tokenizer: Qwen2Tokenizer,
+        tokenizer: TokenizersBackend,
         target: list[int],
         prompt_size: int,
         nudge: float,
@@ -180,12 +236,8 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
         last_token = self.preprocessed_vocab.strings[input_ids[-1]]
         if last_token:
             last_letter = last_token[-1]
-            if last_letter in 'SCR':
-                forbidden_prefixes = 'Z'
-            elif last_letter == 'D':
-                forbidden_prefixes = 'ŻZŹ'
-            else:
-                forbidden_prefixes = ''
+            digraph_map = self.preprocessed_vocab.digit_map.digraph_map
+            forbidden_prefixes = digraph_map.get(last_letter, [])
             for prefix in forbidden_prefixes:
                 mask[self.preprocessed_vocab.startswith[prefix]] = 0
         
@@ -204,7 +256,12 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
         ])  # type: ignore
 
 
-@typing.no_type_check
+@dataclass
+class ModelAndTokenizer:
+    model: GenerationMixin
+    tokenizer: TokenizersBackend
+
+
 def load_model_and_tokenizer(big: bool) -> ModelAndTokenizer:
     if big:
         model_name = "Qwen/Qwen3-8B"
@@ -229,13 +286,14 @@ def encode_digits(
     generate_args: dict,
 ) -> list[str]:
     messages = [{"role": "user", "content": prompt}]
-    text: str = mnt.tokenizer.apply_chat_template(
+    text = mnt.tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
         enable_thinking=False,
-    )  # type: ignore
-    model_inputs = mnt.tokenizer([text], return_tensors="pt").to(mnt.model.device)
+    )
+    text = cast(str, text)
+    model_inputs = mnt.tokenizer([text], return_tensors="pt")
 
     processor = ConstrainedMnemonicProcessor(
         preprocessed_vocab=vocab,
@@ -257,15 +315,17 @@ def encode_digits(
         generated_strings.append(
             mnt.tokenizer.decode(
                 output_ids,
-                skip_special_tokens=True).strip("\n"), # type: ignore
+                skip_special_tokens=True
+            ).strip("\n"), # type: ignore
         )
 
     return generated_strings
 
 
-def main_interactive(big: bool = False):
+def main_interactive(big: bool = False, lang: str = 'pl'):
+    digit_map = DIGIT_MAPS[lang]
     mnt = load_model_and_tokenizer(big=big)
-    prepr_vocab = preprocess_vocab(mnt.tokenizer)
+    prepr_vocab = preprocess_vocab(mnt.tokenizer, digit_map)
 
     while True:
         input_string = input('Digits: ')
@@ -275,21 +335,23 @@ def main_interactive(big: bool = False):
         except:
             print('Invalid input')
             continue
-        prompt = input('Prompt: ') or 'Napisz krótkie zdanie po Polsku.'
+        prompt = input('Prompt (skip for default): ') \
+            or 'Napisz krótkie zdanie po Polsku.'
     
         encoded_strings = encode_digits(
             prompt,
             digits,
             mnt=mnt,
             vocab=prepr_vocab,
-            nudge=3,
+            nudge=2.5,
             stop_nudge=10,
             generate_args=dict(
                 num_beams=20,
-                diversity_penalty=10.,
-                do_sample=True,
+                no_repeat_ngram_size=3,
+                # diversity_penalty=10.,
+                # do_sample=True,
                 early_stopping=True,
-                length_penalty=0.7,
+                # length_penalty=0.7,
                 max_new_tokens=10 * len(digits),
                 num_return_sequences=10,
             ),
@@ -297,7 +359,7 @@ def main_interactive(big: bool = False):
 
         for encoded in encoded_strings:
             print('+' * 50)
-            decoded = string_to_digits(encoded)
+            decoded = digit_map.apply(encoded)
             if decoded != digits:
                 print('[Error]. Back-decoded:', ''.join(map(str, decoded)))
             print(encoded)
