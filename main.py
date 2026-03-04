@@ -121,16 +121,12 @@ class PrefixTreeBuilder:
         self.tokens: list = []
         self.branches: dict[int, Self] = {}
     
-    @classmethod
-    def new(cls):
-        return cls()
-
     def add(self, lst: list[int], id: int):
         if not lst:
             self.tokens.append(id)
             return
         if lst[0] not in self.branches:
-            self.branches[lst[0]] = self.new()
+            self.branches[lst[0]] = type(self)()
         self.branches[lst[0]].add(lst[1:], id)
 
     def build(self) -> PrefixTree:
@@ -228,6 +224,7 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
                 f'Generated: {len(input_ids) - self.prompt_size}. '
                 f'Remaining digits: {len(remaining_digits)}'
             )
+            self.pbar.update()
 
         # Unmask and nudge the EOS token.
         if not remaining_digits:
