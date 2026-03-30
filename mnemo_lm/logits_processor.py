@@ -27,25 +27,25 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
         self.nudge = nudge
         self.stop_nudge = stop_nudge
         if progress:
-            self.pbar = tqdm(desc='Searching...')
+            self.pbar = tqdm(desc="Searching...")
         else:
             self.pbar = None
 
     def call_single(self, input_ids, scores):
         current_digits = []
-        for tok in input_ids[self.prompt_size:]:
+        for tok in input_ids[self.prompt_size :]:
             if tok >= len(self.preprocessed_vocab):
                 continue
             current_digits.extend(self.preprocessed_vocab.digits[tok])
 
         mask = torch.zeros_like(scores, dtype=torch.bool)
 
-        remaining_digits = self.target[len(current_digits):]
-        
+        remaining_digits = self.target[len(current_digits) :]
+
         if self.pbar is not None:
             self.pbar.set_description(
-                f'Generated: {len(input_ids) - self.prompt_size}. '
-                f'Remaining digits: {len(remaining_digits)}'
+                f"Generated: {len(input_ids) - self.prompt_size}. "
+                f"Remaining digits: {len(remaining_digits)}"
             )
             self.pbar.update()
 
@@ -53,15 +53,20 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
         if not remaining_digits:
             eos_id = cast(int, self.tokenizer.eos_token_id)
             scores[eos_id] += self.stop_nudge
-            mask[eos_id] = 1
+            mask[eos_id] = True
 
-        # Unmask and nudge relevant tokens.
-        for i in range(len(remaining_digits) + 1):
-            results = self.preprocessed_vocab.tree.get(remaining_digits[:i])
-            if len(results) == 0:
-                continue
-            scores[results] += self.nudge * i
-            mask[results] = 1
+        # Unmask neutral tokens.
+        tree = self.preprocessed_vocab.tree
+        if len(tree.tokens) > 0:
+            mask[tree.tokens] = True
+        # Unmask and nudge useful tokens, as deep as the prefix tree goes.
+        for i, digit in enumerate(remaining_digits):
+            tree = tree.branches.get(digit)
+            if not tree:
+                break
+            if len(tree.tokens) > 0:
+                scores[tree.tokens] += self.nudge * (i + 1)
+                mask[tree.tokens] = True
 
         # Re-mask anything with a forbidden prefix.
         last_token = self.preprocessed_vocab.strings[input_ids[-1]]
@@ -70,8 +75,8 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
             digraph_map = self.preprocessed_vocab.digit_map.digraph_map
             forbidden_prefixes = digraph_map.get(last_letter, [])
             for prefix in forbidden_prefixes:
-                mask[self.preprocessed_vocab.startswith[prefix]] = 0
-        
+                mask[self.preprocessed_vocab.startswith[prefix]] = False
+
         # Apply mask.
         scores[~mask] = -torch.inf
         return scores
@@ -81,8 +86,6 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
         input_ids: torch.LongTensor,
         scores: torch.FloatTensor,
     ) -> torch.FloatTensor:
-        return torch.stack([
-            self.call_single(i, s)
-            for i, s in zip(input_ids, scores)
-        ])  # type: ignore
-
+        return torch.stack(
+            [self.call_single(i, s) for i, s in zip(input_ids, scores)]
+        )  # type: ignore
