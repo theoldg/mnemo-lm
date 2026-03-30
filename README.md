@@ -16,7 +16,7 @@ Run the interactive generator:
 uv run main.py
 
 # Specify language or model
-uv run main.py --lang en --model qwen-0.6b
+uv run main.py --lang en --model qwen3-0.6b
 ```
 
 ## Example: Digit Mapping for Polish
