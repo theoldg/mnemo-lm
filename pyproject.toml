@@ -1,5 +1,5 @@
 [project]
-name = "memgen2"
+name = "mnemo_lm"
 version = "0.1.0"
 description = "Major system mnemonic generation via constrained LLM decoding."
 readme = "README.md"

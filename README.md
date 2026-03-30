@@ -1,10 +1,10 @@
-# memgen2
+# mnemo_lm
 
 **LLM-powered mnemonic generation** 
 
-`memgen2` uses constrained decoding to force Large Language Models 
+`mnemo_lm` uses constrained decoding to force Large Language Models 
 (like Qwen) to generate coherent phrases that encode specific sequences
-of digits using phonetic/Major System mappings.
+of digits using the Mnemonic Major System.
 
 ## Installation
 [Get `uv`](https://docs.astral.sh/uv/getting-started/installation/) 
@@ -20,7 +20,7 @@ uv run main.py
 uv run main.py --lang en --model qwen-0.6b
 ```
 
-## Digit Mapping for Polish
+## Example: Digit Mapping for Polish
 | Digit | Letters |
 | :--- | :--- |
 | 1 | T, D |
@@ -40,4 +40,4 @@ uv run main.py --lang en --model qwen-0.6b
 At each decoding step, the model's output probabilities are modified.
 Tokens which would map to incorrect digits are masked, while tokens that
 map to desired digits get a boosted probability. See the logit processor 
-[implementation](memgen2/logits_processor.py) for more.
+[implementation](mnemo_lm/logits_processor.py) for more.

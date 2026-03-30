@@ -5,7 +5,7 @@ from transformers import LogitsProcessor, TokenizersBackend
 from tqdm.auto import tqdm
 from typing import cast
 
-from memgen2.vocab_preprocessing import PreprocessedVocab
+from mnemo_lm.vocab_preprocessing import PreprocessedVocab
 
 
 class ConstrainedMnemonicProcessor(LogitsProcessor):

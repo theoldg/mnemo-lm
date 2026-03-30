@@ -7,7 +7,7 @@ import torch
 from transformers import TokenizersBackend
 from tqdm.auto import tqdm
 
-from memgen2.digit_map import DigitMap
+from mnemo_lm.digit_map import DigitMap
 
 
 @dataclass

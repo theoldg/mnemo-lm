@@ -3,10 +3,10 @@ from typing import cast
 from fire import Fire
 from transformers import LogitsProcessorList
 
-from memgen2.digit_map import DIGIT_MAPS
-from memgen2.model import ModelAndTokenizer
-from memgen2.vocab_preprocessing import PreprocessedVocab
-from memgen2.logits_processor import ConstrainedMnemonicProcessor
+from mnemo_lm.digit_map import DIGIT_MAPS
+from mnemo_lm.model import ModelAndTokenizer
+from mnemo_lm.vocab_preprocessing import PreprocessedVocab
+from mnemo_lm.logits_processor import ConstrainedMnemonicProcessor
 
 
 def encode_digits(
