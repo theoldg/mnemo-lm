@@ -28,7 +28,7 @@ You can see the full list of flags using `uv run main.py --help`.
 
 ### Example
 
-Suppose we want to encode the digits `293848`:
+Suppose you want to remember the digits `293848`. Run the script and type them in:
 
 ```
 $ uv run main.py --lang pl --model qwen3-8b
@@ -45,7 +45,7 @@ Na ciepło mówiąc, ręce wije.
 [...]
 ```
 
-Once we remember the mnemonic, we can recover the number by mapping the special letters back to numbers.
+Choose your favourite mnemonic sentence among the generated suggestions. Once you remember the mnemonic, you can recover the number by mapping the special letters back to digits.
 
 "`N`ie `P`oj`M`uję, co `W`y`RW`ało" → 2 9 3 8 4 8
 
