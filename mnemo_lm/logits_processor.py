@@ -1,4 +1,4 @@
-"""Main logic for contrained generation."""
+"""Main logic for constrained generation."""
 
 import torch
 from transformers import LogitsProcessor, TokenizersBackend
