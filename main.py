@@ -81,8 +81,8 @@ def main_interactive(
     prepr_vocab = PreprocessedVocab.build(model_and_tokenizer.tokenizer, digit_map)
 
     while True:
-        input_string = input('Digits: ')
         try:
+            input_string = input('Digits: ')
             digits = list(map(int, str(input_string)))
             if not digits:
                 raise ValueError

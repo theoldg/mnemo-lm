@@ -26,6 +26,8 @@ class DigitMap:
             if len(key) == 2:
                 x, y = key
                 self.digraph_map[x].append(y)
+            elif len(key) >= 3:
+                raise ValueError('Trigraphs are not supported yet!')
 
     def apply(self, s: str) -> list[int]:
         matches = self.pattern.findall(s.upper())
