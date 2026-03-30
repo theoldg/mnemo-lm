@@ -3,6 +3,7 @@
 import torch
 from transformers import LogitsProcessor, TokenizersBackend
 from tqdm.auto import tqdm
+from typing import cast
 
 from memgen2.vocab_preprocessing import PreprocessedVocab
 
@@ -50,7 +51,7 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
 
         # Unmask and nudge the EOS token.
         if not remaining_digits:
-            eos_id = self.tokenizer.convert_tokens_to_ids('<|im_end|>')
+            eos_id = cast(int, self.tokenizer.eos_token_id)
             scores[eos_id] += self.stop_nudge
             mask[eos_id] = 1
 

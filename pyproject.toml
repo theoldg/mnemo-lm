@@ -1,7 +1,7 @@
 [project]
 name = "memgen2"
 version = "0.1.0"
-description = "Add your description here"
+description = "Major system mnemonic generation via constrained LLM decoding."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

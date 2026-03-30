@@ -12,8 +12,9 @@ from transformers import (
 
 
 MODEL_SHORT_NAMES = {
-    'qwen-8b': 'Qwen/Qwen3-8B',
-    'qwen-0.6b': 'Qwen/Qwen3-0.6B',
+    'qwen3-8b': 'Qwen/Qwen3-8B',
+    'qwen3-0.6b': 'Qwen/Qwen3-0.6B',
+    'qwen3.5-9b': 'Qwen/Qwen3.5-9B',
 }
 
 
@@ -26,6 +27,8 @@ class ModelAndTokenizer:
     def load(cls, model_name: str) -> Self:
         model_name = MODEL_SHORT_NAMES.get(model_name, model_name)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if not hasattr(tokenizer, 'eos_token_id'):
+            raise ValueError(f'The tokenizer for {model_name} does not have an `eos_token_id`.')
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype="auto",
