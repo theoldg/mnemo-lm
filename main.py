@@ -82,7 +82,7 @@ def main_interactive(
 
     while True:
         try:
-            input_string = input('Digits: ')
+            input_string = input('Digits: ').replace(' ', '')
             digits = list(map(int, str(input_string)))
             if not digits:
                 raise ValueError
