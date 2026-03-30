@@ -6,14 +6,13 @@
 (like Qwen) to generate coherent phrases that encode specific sequences
 of digits using the Mnemonic Major System.
 
-## Installation
-[Get `uv`](https://docs.astral.sh/uv/getting-started/installation/) 
-if you don't have it, then run `uv sync`.
+## Setup
+[Get `uv`](https://docs.astral.sh/uv/getting-started/installation/) and run `uv sync`.
 
 ## Usage
 Run the interactive generator:
 ```bash
-# Defaults to Polish and qwen-8b
+# Defaults to Polish and qwen3-8b
 uv run main.py
 
 # Specify language or model

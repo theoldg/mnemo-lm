@@ -55,7 +55,7 @@ def encode_digits(
     return generated_strings
 
 
-def main_interactive(lang: str = 'pl', model: str = 'qwen-8b'):
+def main_interactive(lang: str = 'pl', model: str = 'qwen3-8b'):
     digit_map = DIGIT_MAPS[lang]
     model_and_tokenizer = ModelAndTokenizer.load(model_name=model)
     prepr_vocab = PreprocessedVocab.build(model_and_tokenizer.tokenizer, digit_map)
