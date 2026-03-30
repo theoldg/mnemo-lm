@@ -55,7 +55,27 @@ def encode_digits(
     return generated_strings
 
 
-def main_interactive(lang: str = 'pl', model: str = 'qwen3-8b'):
+def main_interactive(
+    lang: str = 'pl',
+    model: str = 'qwen3-8b',
+    nudge: float = 2.5,
+    stop_nudge: float = 10.0,
+    num_beams: int = 20,
+    num_return_sequences: int = 10,
+    max_tokens_per_digit: int = 10,
+):
+    """
+    Interactive generator for LLM-powered Major System mnemonics.
+
+    Args:
+        lang: Language for the digit mapping (e.g., 'pl', 'en').
+        model: Model short name or HuggingFace ID (e.g., 'qwen3-8b', 'qwen3-0.6b').
+        nudge: Logit multiplier to boost the probabilities of matching tokens.
+        stop_nudge: Logit multiplier to boost the EOS token when generation is complete.
+        num_beams: Number of beams to use during beam search generation.
+        num_return_sequences: Number of distinct mnemonic phrases to generate.
+        max_tokens_per_digit: Force stops generation after the total budget is exhausted.
+    """
     digit_map = DIGIT_MAPS[lang]
     model_and_tokenizer = ModelAndTokenizer.load(model_name=model)
     prepr_vocab = PreprocessedVocab.build(model_and_tokenizer.tokenizer, digit_map)
@@ -64,28 +84,32 @@ def main_interactive(lang: str = 'pl', model: str = 'qwen3-8b'):
         input_string = input('Digits: ')
         try:
             digits = list(map(int, str(input_string)))
-            assert digits
-        except:
-            print('Invalid input')
+            if not digits:
+                raise ValueError
+        except ValueError:
+            print('Invalid input. Please enter only numbers.')
             continue
-        prompt = input('Prompt (skip for default): ') or digit_map.default_prompt
+        except KeyboardInterrupt:
+            return
+            
+        try:
+            prompt = input('Prompt (skip for default): ') or digit_map.default_prompt
+        except KeyboardInterrupt:
+            return
     
         encoded_strings = encode_digits(
             prompt,
             digits,
             model_and_tokenizer=model_and_tokenizer,
             vocab=prepr_vocab,
-            nudge=2.5,
-            stop_nudge=10,
+            nudge=nudge,
+            stop_nudge=stop_nudge,
             generate_args=dict(
-                num_beams=20,
+                num_beams=num_beams,
                 no_repeat_ngram_size=3,
                 early_stopping=True,
-                max_new_tokens=10 * len(digits),
-                num_return_sequences=10,
-                # diversity_penalty=10.,
-                # do_sample=True,
-                # length_penalty=0.7,
+                max_new_tokens=max_tokens_per_digit * len(digits),
+                num_return_sequences=num_return_sequences,
             ),
         )
 
