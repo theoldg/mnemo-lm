@@ -7,7 +7,9 @@
 of digits using the Mnemonic Major System.
 
 I made this for fun after learning about constrained decoding and the Major
-System and thinking that they fit together nicely.
+System and thinking that they fit together nicely. 
+
+Also check out [MemGen](https://igrek51.github.io/memgen)!
 
 ## Setup
 [Get `uv`](https://docs.astral.sh/uv/getting-started/installation/) and run `uv sync`.
