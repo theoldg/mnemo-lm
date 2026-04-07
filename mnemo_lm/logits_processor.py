@@ -31,7 +31,7 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
         else:
             self.pbar = None
 
-    def call_single(self, input_ids, scores):
+    def call_single(self, input_ids, scores) -> torch.FloatTensor:
         current_digits = []
         for tok in input_ids[self.prompt_size :]:
             if tok >= len(self.preprocessed_vocab):

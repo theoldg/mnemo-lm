@@ -3,9 +3,9 @@ from fire import Fire
 
 def main(
     lang: str = "pl",
-    model: str = "qwen3-8b",
-    nudge: float = 2.5,
-    stop_nudge: float = 10.0,
+    model: str = "gemma4-4b",
+    nudge: float = 3.5,
+    stop_nudge: float = 15.0,
     num_beams: int = 20,
     num_return_sequences: int = 10,
     max_tokens_per_digit: int = 10,

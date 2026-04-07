@@ -12,6 +12,8 @@ from transformers import (
 
 
 MODEL_SHORT_NAMES = {
+    'gemma4-4b': 'google/gemma-4-E4B-it',
+    'gemma4-2b': 'google/gemma-4-E2B-it',
     'qwen3-8b': 'Qwen/Qwen3-8B',
     'qwen3-0.6b': 'Qwen/Qwen3-0.6B',
     'qwen3.5-9b': 'Qwen/Qwen3.5-9B',
