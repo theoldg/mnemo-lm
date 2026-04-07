@@ -1,9 +1,10 @@
 """Main logic for constrained generation."""
 
 import torch
+from torch import LongTensor, FloatTensor
 from transformers import LogitsProcessor, TokenizersBackend
 from tqdm.auto import tqdm
-from typing import cast
+from typing import cast, no_type_check
 
 from mnemo_lm.vocab_preprocessing import PreprocessedVocab
 
@@ -31,16 +32,42 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
         else:
             self.pbar = None
 
-    def call_single(self, input_ids, scores) -> torch.FloatTensor:
+    def call_single(self, input_ids: LongTensor, scores: FloatTensor) -> FloatTensor:
+        """Return updated next token logits.
+        
+        Suppose we already generated tokens [..., Tx, Ty, Tz], which cover some
+        of the target digits (`self.target`), so that the remaining digits to
+        encode are [Di, Dj, Dk, ...].
+
+        This function does the following:
+            - Forbid any token which maps to undesired digits by replacing its
+              logit with -inf.
+            - Forbid any token which creates a digraph with the previous token,
+              i.e. any Tw such that digits([Tz] + [Tw]) != digits([Tz]) + digits([Tw]).
+            - Allow any neutral token, i.e. any Tw where digits([Tw]) = [].
+            - Boost any token which generates desired digits:
+              If digits([Tw]) = [Di], add `self.nudge` to the logit,
+              if digits([Tw]) = [Di, Dj], add `2 * self.nudge`, etc.
+            - If there are no more digits to encode, boost the probability of
+              generating [EOS] by adding `stop_nudge` to the corresponding logit.
+
+        Args:
+            input_ids: Current generation sequence, 1D tensor with token IDs.
+            scores: Next token logits from the model.
+
+        Returns:
+            Modified scores (logits).
+        """
         current_digits = []
         for tok in input_ids[self.prompt_size :]:
             if tok >= len(self.preprocessed_vocab):
                 continue
             current_digits.extend(self.preprocessed_vocab.digits[tok])
 
-        mask = torch.zeros_like(scores, dtype=torch.bool)
-
         remaining_digits = self.target[len(current_digits) :]
+
+        # Mask everything by default.
+        mask = torch.zeros_like(scores, dtype=torch.bool)
 
         if self.pbar is not None:
             self.pbar.set_description(
@@ -49,8 +76,8 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
             )
             self.pbar.update()
 
-        # Unmask and nudge the EOS token.
         if not remaining_digits:
+            # Unmask and nudge the EOS token.
             eos_id = cast(int, self.tokenizer.eos_token_id)
             scores[eos_id] += self.stop_nudge
             mask[eos_id] = True
@@ -81,11 +108,12 @@ class ConstrainedMnemonicProcessor(LogitsProcessor):
         scores[~mask] = -torch.inf
         return scores
 
+    @no_type_check
     def __call__(
         self,
-        input_ids: torch.LongTensor,
+        input_ids: LongTensor,
         scores: torch.FloatTensor,
-    ) -> torch.FloatTensor:
+    ) -> FloatTensor:
         return torch.stack(
             [self.call_single(i, s) for i, s in zip(input_ids, scores)]
-        )  # type: ignore
+        )
